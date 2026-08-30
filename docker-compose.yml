@@ -1,0 +1,57 @@
+# Design doc §10. Four services. Deploy: docker compose up -d --build
+#
+# Two things that bite if skipped:
+#  - `media` is a named volume mounted in BOTH web/api-adjacent
+#    services that touch it — api writes, nginx serves. Miss this and
+#    uploads succeed but 404 for every reader.
+#  - `web` runs as a single instance, no replicas — see §11 "ISR cache
+#    is per-process".
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    env_file: .env
+    volumes:
+      - next-cache:/app/apps/web/.next/cache
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    # deliberately no `deploy.replicas` / cluster mode
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    volumes:
+      - media:/app/media
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    env_file: .env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - media:/var/www/media:ro
+    depends_on:
+      - web
+      - api
+    restart: unless-stopped
+
+volumes:
+  media:
+  pgdata:
+  next-cache:

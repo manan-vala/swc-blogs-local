@@ -1,0 +1,220 @@
+// SWC Blogs — data model
+// See the design doc §5 (Data model) and §7 (Roles and the superadmin panel)
+// for the reasoning behind each field.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"] // Alpine/Docker
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPERADMIN
+  CLUB_SECY
+}
+
+enum AuthProvider {
+  PASSWORD // SWC maintainer — break-glass path, independent of SSO
+  SSO // club secretary — institute SSO + whitelist
+}
+
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum SyncStatus {
+  SUCCESS
+  FAILED
+}
+
+model Club {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  logoPath    String?
+  description String?
+  category    String? // technical | cultural | board | hostel
+  accentColor String? // default accent token for this club's posts
+  pattern     String? // default header pattern token
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users     User[]
+  posts     Post[]
+  whitelist Whitelist[]
+}
+
+/// Superadmin-managed. Checked at SSO login to admit a secretary and
+/// resolve their club. Revoke, don't delete — keeps the audit trail intact.
+model Whitelist {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  clubId    String
+  club      Club      @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  addedById String?
+  addedBy   User?     @relation("WhitelistAddedBy", fields: [addedById], references: [id])
+  addedAt   DateTime  @default(now())
+  revokedAt DateTime?
+
+  @@index([clubId])
+}
+
+/// Only people who have logged in. Readers need no account.
+/// Carries both sign-in paths — `provider` says which set of fields to trust.
+model User {
+  id       String       @id @default(uuid())
+  email    String       @unique
+  name     String
+  role     Role
+  provider AuthProvider
+
+  // --- SSO path (CLUB_SECY) ---
+  ssoId  String? @unique
+  clubId String?
+  club   Club?   @relation(fields: [clubId], references: [id])
+
+  // --- Password path (SUPERADMIN) — argon2id, never a fast hash ---
+  passwordHash  String?
+  passwordSetAt DateTime?
+  isActive      Boolean   @default(true)
+  failedLogins  Int       @default(0) // counts password AND totp failures
+  lockedUntil   DateTime?
+
+  // --- TOTP — secret encrypted at rest, never stored plaintext ---
+  totpSecret    String?
+  totpEnabledAt DateTime?
+  totpLastStep  Int? // last accepted time-step, blocks replay
+
+  createdAt   DateTime  @default(now())
+  lastLoginAt DateTime?
+
+  posts             Post[]
+  whitelistEntries  Whitelist[]  @relation("WhitelistAddedBy")
+  auditEntries      AuditLog[]   @relation("AuditActor")
+  backupCodes       BackupCode[]
+
+  @@index([clubId])
+}
+
+/// Single-use TOTP recovery codes. Hashed like passwords — the plaintext
+/// is shown once at enrolment and never again. There is no public
+/// password-reset flow, so these are the only recovery path short of
+/// server CLI access.
+model BackupCode {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+/// Every privileged action, so "who granted this and when" has an answer —
+/// SWC maintainers turn over every year and have no other record of this.
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String
+  actor      User     @relation("AuditActor", fields: [actorId], references: [id])
+  action     String // whitelist.add | whitelist.revoke | post.takedown | user.create ...
+  targetType String // "Whitelist" | "Post" | "User" | "Club"
+  targetId   String
+  detail     Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([targetType, targetId])
+  @@index([createdAt])
+}
+
+model Post {
+  id           String @id @default(uuid())
+  notionPageId String @unique
+  title        String
+  slug         String @unique // generated once at first publish, never regenerated
+  excerpt      String?
+  clubId       String
+  club         Club   @relation(fields: [clubId], references: [id], onDelete: Restrict)
+  authorId     String
+  author       User   @relation(fields: [authorId], references: [id])
+
+  content        String  @db.Text // rendered Markdown — the primary format
+  rawBlocks      Json? // raw Notion block tree — migration insurance
+  contentHash    String? // lets a no-op re-sync bail out early
+  coverImagePath String?
+
+  accentColor    String? // falls back to the club default
+  pattern        String?
+  readingMinutes Int?
+
+  status       PostStatus @default(DRAFT)
+  publishedAt  DateTime?
+  lastSyncedAt DateTime?
+  previewToken String?    @unique // unguessable draft preview URL
+  lastError    String? // brief author-facing reason for the last failed sync, if any
+  views        Int        @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tags     PostTag[]
+  media    Media[]
+  syncLogs SyncLog[]
+
+  @@index([clubId, status, publishedAt])
+  @@index([status, publishedAt])
+}
+
+model Tag {
+  id    String    @id @default(uuid())
+  name  String    @unique
+  slug  String    @unique
+  posts PostTag[]
+}
+
+model PostTag {
+  postId String
+  tagId  String
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+}
+
+/// One row per rehosted file. Enables orphan cleanup and dedup on re-sync.
+model Media {
+  id            String   @id @default(uuid())
+  postId        String
+  post          Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  notionBlockId String
+  path          String
+  sourceHash    String?
+  width         Int?
+  height        Int?
+  sizeBytes     Int?
+  createdAt     DateTime @default(now())
+
+  @@unique([postId, notionBlockId])
+}
+
+/// One row per sync attempt. Full history lives in the admin panel only —
+/// authors see a short `Post.lastError` message instead (see §9).
+model SyncLog {
+  id         String     @id @default(uuid())
+  postId     String
+  post       Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  status     SyncStatus
+  trigger    String // "publish" | "update" | "cron"
+  message    String?    @db.Text
+  durationMs Int?
+  syncedAt   DateTime   @default(now())
+
+  @@index([postId, syncedAt])
+}

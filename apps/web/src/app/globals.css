@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Accent + pattern values — PLACEHOLDER pending the real contrast-
+ * checked palette (design doc §13, open items). Keep these in sync
+ * with packages/shared/src/tokens.ts's ACCENT_SWATCHES until the
+ * picker starts reading directly from a shared source of truth.
+ */
+:root {
+  --accent-teal: #0f766e;
+  --accent-coral: #e2624f;
+  --accent-indigo: #4338ca;
+  --accent-amber: #b45309;
+  --accent-rose: #be123c;
+  --accent-moss: #4d7c0f;
+}
+
+/*
+ * A pattern is a decorative ::before layer behind the content, NOT a
+ * property on the header itself — opacity on the header would fade
+ * its title text along with the background. `isolate` + explicit
+ * z-index keeps the pattern strictly behind post-header__inner.
+ */
+[class^="pattern-"] {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+[class^="pattern-"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.06;
+  color: var(--accent);
+}
+.post-header__inner {
+  position: relative;
+  z-index: 1;
+}
+
+.pattern-dots::before {
+  background-image: radial-gradient(currentColor 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+.pattern-grid::before {
+  background-image:
+    linear-gradient(currentColor 1px, transparent 1px),
+    linear-gradient(90deg, currentColor 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.pattern-diagonal::before {
+  background-image: repeating-linear-gradient(45deg, currentColor 0 1px, transparent 1px 12px);
+}
+.pattern-waves::before {
+  background-image: repeating-radial-gradient(circle at 0 0, transparent 0, currentColor 12px);
+  background-size: 24px 24px;
+}

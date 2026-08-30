@@ -1,0 +1,21 @@
+{
+  "name": "swc-blogs",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "db:generate": "pnpm --filter @swc-blogs/db generate",
+    "db:migrate": "pnpm --filter @swc-blogs/db migrate:dev",
+    "db:studio": "pnpm --filter @swc-blogs/db studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.1.0",
+    "typescript": "^5.6.0"
+  }
+}
