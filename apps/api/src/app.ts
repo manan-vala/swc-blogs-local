@@ -6,9 +6,16 @@ import { adminRouter } from "./routes/admin.routes.js";
 import { clubsRouter } from "./routes/clubs.routes.js";
 import { searchRouter } from "./routes/search.routes.js";
 import { sessionMiddleware } from "./middleware/session.js";
+import { devCors } from "./middleware/cors.js";
 
 export function createApp() {
   const app = express();
+
+  // Ahead of everything else: an OPTIONS preflight has to get its
+  // Access-Control-* headers and 204 before any body/cookie parsing or
+  // route matching ever sees it. No-ops entirely when DEV_CORS_ORIGIN
+  // isn't set (every production deployment) — see cors.ts.
+  app.use(devCors);
 
   app.use(express.json());
   app.use(cookieParser());

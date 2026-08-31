@@ -2,6 +2,13 @@
   "$schema": "https://json.schemastore.org/tsconfig",
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    // tsconfig.base.json's "lib": ["ES2022"] is right for the Node
+    // services (apps/api, packages/db) but wrong here — a browser app
+    // needs the DOM types too, or every `window`, event target, and DOM
+    // element property (input.value, and so on) fails to typecheck.
+    // create-next-app normally generates this for you; this project's
+    // hand-rolled extends chain never did.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "preserve",

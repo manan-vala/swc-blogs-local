@@ -36,6 +36,16 @@ const envSchema = z.object({
   REVALIDATE_SECRET: z.string().min(16),
 
   MEDIA_DIR: z.string().default("/app/media"),
+
+  // Local dev only: `pnpm dev` runs web (:3000) and api (:4000) as two
+  // origins with no nginx in front of them, but every browser call this
+  // API serves — the SSO callback aside — is a credentialed fetch
+  // (cookies). Without an explicit Access-Control-Allow-Origin the
+  // browser silently drops every one of them at the CORS preflight, no
+  // matter how correct the route itself is. Unset in production: nginx
+  // same-origins everything under /blogs there, so no CORS is involved
+  // at all and this middleware (see lib/cors.ts) never engages.
+  DEV_CORS_ORIGIN: z.string().url().optional(),
 });
 
 export const env = envSchema.parse(process.env);
