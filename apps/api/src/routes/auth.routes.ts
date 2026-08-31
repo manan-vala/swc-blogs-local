@@ -9,27 +9,51 @@ import { env } from "../lib/env.js";
 export const authRouter = Router();
 
 /**
- * Club secretary sign-in. SSO redirect → callback → email checked
- * against Whitelist → session issued with role + club (§7, step 1).
- * Wire to the institute's actual SSO/CAS provider here.
+ * Club secretary sign-in — design doc §7, step 1: SSO redirect →
+ * callback → email checked against Whitelist → session issued with
+ * role + club. Institute SSO isn't wired yet: which protocol IITG
+ * actually speaks (CAS vs OAuth2/OIDC) is still open per §13, and
+ * SSO_CLIENT_ID/SSO_CLIENT_SECRET have nowhere to be used until it's
+ * decided. Both endpoints fail closed with 501 until then.
+ *
+ * This replaces a real bug, not just a stub: the previous callback
+ * trusted `req.query.email` directly as a verified identity, so
+ * `GET /sso/callback?email=<any-whitelisted-address>` minted a valid
+ * session for that secretary — no SSO involved. There's no partial-safe
+ * middle ground between "verified by the SSO exchange" and "not wired";
+ * a callback that issues sessions from unauthenticated input is worse
+ * than one that 501s.
+ *
+ * admitClubSecretary() below keeps the whitelist-check-and-issue logic
+ * ready: once the exchange lands, the callback becomes "verify the
+ * code, pull the email out of the verified SSO profile, then call
+ * admitClubSecretary(email)". Never call it with request input that
+ * hasn't gone through that verification.
  */
 authRouter.get("/sso/login", (_req, res) => {
   // TODO: redirect to SSO_CLIENT_ID's authorize endpoint.
   res.status(501).json({ error: "SSO integration not yet wired." });
 });
 
-authRouter.get("/sso/callback", async (req, res) => {
-  // TODO: exchange code, extract email from the SSO profile.
-  const email = req.query.email as string | undefined; // placeholder
-  if (!email) return res.status(400).json({ error: "No email from SSO." });
+authRouter.get("/sso/callback", async (_req, res) => {
+  // TODO: exchange the code, verify it, and extract the email from the
+  // SSO profile — then await admitClubSecretary(email) and set the
+  // cookie on ok:true, or redirect with a not-whitelisted notice.
+  res.status(501).json({ error: "SSO integration not yet wired." });
+});
 
-  const entry = await prisma.whitelist.findFirst({
-    where: { email, revokedAt: null },
-  });
-  if (!entry) {
-    // Not whitelisted — public site access only, no session issued.
-    return res.redirect("/blogs?notice=not-whitelisted");
-  }
+/**
+ * Whitelist check + session issuance for a club secretary — the second
+ * half of §7 step 1. `email` must already be verified by the caller
+ * (i.e. it came out of a completed SSO exchange) — this function does
+ * no verification of its own and will happily upsert a User and hand
+ * back a live session token for whatever string it's given.
+ */
+export async function admitClubSecretary(
+  email: string
+): Promise<{ ok: true; token: string; clubId: string } | { ok: false; reason: "not-whitelisted" }> {
+  const entry = await prisma.whitelist.findFirst({ where: { email, revokedAt: null } });
+  if (!entry) return { ok: false, reason: "not-whitelisted" };
 
   const user = await prisma.user.upsert({
     where: { email },
@@ -47,9 +71,8 @@ authRouter.get("/sso/callback", async (req, res) => {
     { sub: user.id, role: user.role, clubId: user.clubId },
     env.SESSION_SECRET
   );
-  setSessionCookie(res, token);
-  res.redirect("/blogs/dashboard");
-});
+  return { ok: true, token, clubId: entry.clubId };
+}
 
 /**
  * Superadmin sign-in — email + password, then TOTP. Break-glass path,
