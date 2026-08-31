@@ -68,10 +68,11 @@ without reading the design doc's ISR-cache section first.
 
 - [ ] Wire the institute SSO exchange in `apps/api/src/routes/auth.routes.ts` — both endpoints correctly 501 until then; the exchange itself needs IITG's actual protocol decided first (CAS vs OAuth2/OIDC — §13, still open)
 - [ ] Pick and contrast-check the accent/pattern palette (`packages/shared/src/tokens.ts`)
-- [ ] Build the superadmin panel screens beyond whitelist/clubs/posts/sync/audit — §7's "Superadmins" and "Health" screens; `/admin` is currently just the sign-in landing spot (no route to create a second superadmin yet, only the CLI)
+- [ ] Build the "Superadmins" and "Health" panel screens (§7) — creating a second superadmin, disabling one, and re-enrolling TOTP/backup codes is still CLI-only (`create-superadmin`); there's no health-at-a-glance screen (Notion token validity, per-club sync status, media directory size) yet
 - [x] Notion→internal link rewriting pass in the sync service — `apps/api/src/services/link-rewrite.service.ts`
 - [x] Superadmin auth end-to-end — bootstrap/reset CLI (`apps/api/src/cli/create-superadmin.ts`), TOTP enrolment with a mandatory live-code check, real escalating account lockout, and backup-code login — see `apps/api/src/services/auth.service.ts` and `apps/api/src/routes/auth.routes.ts`
 - [x] Admin login UI — two-step password → TOTP/backup-code form (`apps/web/src/components/admin/AdminLoginForm.tsx`) plus a minimal gated `/admin` landing page and sign-out
+- [x] Superadmin panel core — Whitelist, Clubs, Posts (oversight + takedown + forced re-sync), Sync logs, and Audit trail screens under `apps/web/src/app/admin/*`, backed by `apps/api/src/routes/admin.routes.ts`. Club logo upload isn't wired (no media-upload endpoint exists yet); "correct post metadata" beyond takedown/re-sync is deferred too.
 - [ ] Decide the deployment pipeline (design doc §13, still open)
 
 ## Fixed along the way

@@ -23,10 +23,17 @@ export const createClubSchema = z.object({
     .max(80)
     .regex(/^[a-z0-9-]+$/, "lowercase letters, numbers and hyphens only"),
   category: z.string().max(40).optional(),
+  description: z.string().max(500).optional(),
   accentColor: z.enum(ACCENT_TOKENS).optional(),
   pattern: z.enum(PATTERN_TOKENS).optional(),
 });
 export type CreateClubInput = z.infer<typeof createClubSchema>;
+
+/** Edit an existing club. Slug is deliberately excluded — it's load-bearing
+ *  for the club's archive URL and, like a post's slug (§11), is treated as
+ *  frozen once created rather than risking a dead link. */
+export const updateClubSchema = createClubSchema.omit({ slug: true }).partial();
+export type UpdateClubInput = z.infer<typeof updateClubSchema>;
 
 export const whitelistAddSchema = z.object({
   email: z.string().email(),

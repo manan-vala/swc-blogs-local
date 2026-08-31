@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { prisma } from "@swc-blogs/db";
-import { whitelistAddSchema, createClubSchema } from "@swc-blogs/shared";
+import { whitelistAddSchema, createClubSchema, updateClubSchema } from "@swc-blogs/shared";
 import { requireSuperadmin } from "../middleware/requireAuth.js";
+import { syncPost } from "../services/notion-sync.service.js";
 
 /**
  * Superadmin panel routes — design doc §7. Everything here is gated by
@@ -51,6 +52,17 @@ adminRouter.post("/clubs", async (req, res) => {
   res.status(201).json(club);
 });
 
+adminRouter.patch("/clubs/:id", async (req, res) => {
+  const parsed = updateClubSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid input." });
+  if (Object.keys(parsed.data).length === 0) {
+    return res.status(400).json({ error: "Nothing to update." });
+  }
+  const club = await prisma.club.update({ where: { id: req.params.id }, data: parsed.data });
+  await audit(req.user!.id, "club.update", "Club", club.id, parsed.data, req.ip);
+  res.json(club);
+});
+
 // --- Posts: the takedown path that replaces pre-publish review ---
 
 adminRouter.post("/posts/:id/unpublish", async (req, res) => {
@@ -59,6 +71,18 @@ adminRouter.post("/posts/:id/unpublish", async (req, res) => {
     data: { status: "ARCHIVED" },
   });
   await audit(req.user!.id, "post.takedown", "Post", post.id, null, req.ip);
+  res.json(post);
+});
+
+/** Force a re-sync outside the author's own publish/update flow — e.g.
+ *  after fixing a stuck integration, without waiting for the next edit
+ *  in Notion. Uses the same syncPost path as everything else, so a
+ *  forced sync can't drift from what a normal publish would produce. */
+adminRouter.post("/posts/:id/resync", async (req, res) => {
+  const result = await syncPost(req.params.id!, "admin");
+  if (!result.ok) return res.status(422).json({ error: result.error });
+  await audit(req.user!.id, "post.resync", "Post", req.params.id!, null, req.ip);
+  const post = await prisma.post.findUniqueOrThrow({ where: { id: req.params.id } });
   res.json(post);
 });
 

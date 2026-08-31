@@ -26,7 +26,10 @@ export interface SyncResult {
   durationMs: number;
 }
 
-export async function syncPost(postId: string, trigger: "publish" | "update" | "cron"): Promise<SyncResult> {
+export async function syncPost(
+  postId: string,
+  trigger: "publish" | "update" | "cron" | "admin"
+): Promise<SyncResult> {
   const start = Date.now();
   const post = await prisma.post.findUniqueOrThrow({ where: { id: postId } });
 
