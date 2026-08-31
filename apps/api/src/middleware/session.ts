@@ -23,3 +23,14 @@ export function setSessionCookie(res: Response, token: string) {
     path: "/",
   });
 }
+
+/** Attribute options must match setSessionCookie's (minus maxAge) or the
+ *  browser won't recognize this as clearing the same cookie. */
+export function clearSessionCookie(res: Response) {
+  res.clearCookie(SESSION_COOKIE_NAME, {
+    httpOnly: true,
+    secure: env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+  });
+}

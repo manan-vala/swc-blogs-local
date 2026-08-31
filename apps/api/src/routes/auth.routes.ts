@@ -9,7 +9,7 @@ import {
 } from "@swc-blogs/shared";
 import { prisma } from "@swc-blogs/db";
 import { authRateLimit } from "../middleware/rateLimit.js";
-import { setSessionCookie } from "../middleware/session.js";
+import { setSessionCookie, clearSessionCookie } from "../middleware/session.js";
 import {
   verifyPassword,
   verifyTotpCode,
@@ -22,6 +22,14 @@ import {
 import { env } from "../lib/env.js";
 
 export const authRouter = Router();
+
+/** Works for either session kind — secretary or superadmin — since both
+ *  are the same cookie. Always 200s, even with nothing to clear: from
+ *  the caller's side "make sure I'm signed out" should never fail. */
+authRouter.post("/logout", (_req, res) => {
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
 
 /**
  * Club secretary sign-in — design doc §7, step 1: SSO redirect →
