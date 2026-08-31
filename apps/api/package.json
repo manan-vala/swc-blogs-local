@@ -8,7 +8,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "lint": "eslint src",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@swc-blogs/db": "workspace:*",
@@ -27,12 +28,14 @@
     "dotenv": "^16.4.5"
   },
   "devDependencies": {
+    "@swc-blogs/config": "workspace:*",
     "@types/express": "^5.0.0",
     "@types/node": "^20.16.0",
     "@types/node-cron": "^3.0.11",
     "@types/cookie-parser": "^1.4.7",
     "@types/qrcode": "^1.5.5",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.4"
   }
 }

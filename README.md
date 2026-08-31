@@ -30,6 +30,24 @@ pnpm --filter @swc-blogs/db exec tsx prisma/seed.ts you@iitg.ac.in "Your Name"
 pnpm dev                     # runs web + api together via turbo
 ```
 
+## Testing
+
+```bash
+pnpm test                    # unit tests, no external services needed
+```
+
+The sync pipeline's `resolveInternalPageSlug` also has an integration
+suite that runs against a real Postgres instead of a fake resolver —
+skipped automatically unless `DATABASE_URL` is set:
+
+```bash
+docker run -d -p 55432:5432 -e POSTGRES_PASSWORD=postgres postgres:16
+DATABASE_URL=postgresql://postgres:postgres@localhost:55432/postgres \
+  pnpm db:migrate
+DATABASE_URL=postgresql://postgres:postgres@localhost:55432/postgres \
+  pnpm --filter @swc-blogs/api test
+```
+
 ## Deploying
 
 ```bash
@@ -45,5 +63,5 @@ without reading the design doc's ISR-cache section first.
 - [ ] Wire the institute SSO exchange in `apps/api/src/routes/auth.routes.ts`
 - [ ] Pick and contrast-check the accent/pattern palette (`packages/shared/src/tokens.ts`)
 - [ ] Build the dashboard and admin-login UI (currently stubs)
-- [ ] Notion→internal link rewriting pass in the sync service (marked TODO)
+- [x] Notion→internal link rewriting pass in the sync service — `apps/api/src/services/link-rewrite.service.ts`
 - [ ] Decide the deployment pipeline (design doc §13, still open)

@@ -7,6 +7,7 @@ import fs from "node:fs/promises";
 import { prisma } from "@swc-blogs/db";
 import { ALLOWED_EMBED_ORIGINS } from "@swc-blogs/shared";
 import { env } from "../lib/env.js";
+import { rewriteInternalLinks } from "./link-rewrite.service.js";
 
 /**
  * The sync pipeline — design doc §8. Runs on Publish/Update (immediate)
@@ -44,7 +45,12 @@ export async function syncPost(postId: string, trigger: "publish" | "update" | "
     registerTransformers(postId);
 
     // 6. convert
-    const { parent: markdown } = await n2m.toMarkdownString(await n2m.pageToMarkdown(post.notionPageId));
+    const { parent: rendered } = await n2m.toMarkdownString(await n2m.pageToMarkdown(post.notionPageId));
+
+    // 6b. links — notion.so/{id} -> /blogs/{slug} for anything that
+    // resolves to one of our own published posts; everything else
+    // (external URLs, foreign Notion pages, drafts) passes through as-is.
+    const markdown = await rewriteInternalLinks(rendered ?? "", resolveInternalPageSlug);
 
     // 7. derive
     const readingMinutes = Math.max(1, Math.round(markdown.split(/\s+/).length / 200));
@@ -120,12 +126,21 @@ function registerTransformers(postId: string) {
     return `<!-- embed:${embedUrl} -->`;
   });
 
-  // Link rewriting (notion.so/{pageId} -> /blogs/{slug}) happens on the
-  // rendered Markdown in a post-process pass — notion-to-md's per-span
-  // rich-text hook doesn't cleanly expose an async DB lookup, so this
-  // runs as a regex pass over the output before it's stored. Implement
-  // alongside the transformers above once notion-to-md's block content
-  // is finalized.
+  // Link rewriting (notion.so/{pageId} -> /blogs/{slug}) runs as a
+  // separate post-process pass over the rendered Markdown instead of a
+  // transformer here — see rewriteInternalLinks below and its module doc.
+}
+
+/** Resolves a linked Notion page id to a slug, only if it's one of our
+ *  own published posts — see link-rewrite.service.ts's module doc for why
+ *  a draft or foreign page is left as its original Notion URL instead.
+ *  Exported for integration testing against a real database. */
+export async function resolveInternalPageSlug(notionPageId: string): Promise<string | null> {
+  const linked = await prisma.post.findUnique({
+    where: { notionPageId },
+    select: { slug: true, status: true },
+  });
+  return linked && linked.status === "PUBLISHED" ? linked.slug : null;
 }
 
 async function downloadAndStore(url: string, postId: string, blockId: string): Promise<string> {
