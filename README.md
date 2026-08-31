@@ -26,9 +26,15 @@ pnpm install
 cp .env.example .env        # fill in real values — see comments inline
 pnpm db:generate
 pnpm db:migrate              # then apply packages/db/prisma/migrations_manual/001_fulltext_search.sql once, by hand
-pnpm --filter @swc-blogs/db exec tsx prisma/seed.ts you@iitg.ac.in "Your Name"
+pnpm --filter @swc-blogs/api create-superadmin you@iitg.ac.in "Your Name"
 pnpm dev                     # runs web + api together via turbo
 ```
+
+The `create-superadmin` script is also the reset path — there's no
+public password reset by design (§7). Run it again against an existing
+email to replace their password, TOTP secret, and backup codes; it's
+the only way back in if a maintainer loses their phone with no backup
+codes left.
 
 ## Testing
 
@@ -60,8 +66,9 @@ without reading the design doc's ISR-cache section first.
 
 ## Before this goes further than a scaffold
 
-- [ ] Wire the institute SSO exchange in `apps/api/src/routes/auth.routes.ts`
+- [ ] Wire the institute SSO exchange in `apps/api/src/routes/auth.routes.ts` — both endpoints correctly 501 until then; the exchange itself needs IITG's actual protocol decided first (CAS vs OAuth2/OIDC — §13, still open)
 - [ ] Pick and contrast-check the accent/pattern palette (`packages/shared/src/tokens.ts`)
-- [ ] Build the dashboard and admin-login UI (currently stubs)
+- [ ] Build the admin-login UI (still a stub) and the superadmin panel screens beyond whitelist/clubs/posts/sync/audit (§7's "Superadmins" and "Health" screens — no route to create a second superadmin yet, only the CLI)
 - [x] Notion→internal link rewriting pass in the sync service — `apps/api/src/services/link-rewrite.service.ts`
+- [x] Superadmin auth end-to-end — bootstrap/reset CLI (`apps/api/src/cli/create-superadmin.ts`), TOTP enrolment with a mandatory live-code check, real escalating account lockout, and backup-code login — see `apps/api/src/services/auth.service.ts` and `apps/api/src/routes/auth.routes.ts`
 - [ ] Decide the deployment pipeline (design doc §13, still open)

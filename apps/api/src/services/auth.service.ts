@@ -12,7 +12,71 @@ export async function verifyPassword(hash: string, plain: string): Promise<boole
   return argon2.verify(hash, plain);
 }
 
+// --- Account lockout (§7: "rate limiting and lockout ... with a slow
+// lockout after repeated failures. Track failedLoginCount and
+// lockedUntil on the user.") ---
+//
+// Pure state transitions only — no DB access here, by the same
+// convention as the rest of this file (packages/db stays free of auth
+// logic; the routes own every prisma call). Callers persist whatever
+// these return.
+
+export const LOCKOUT_THRESHOLD = 5; // failed attempts before the first lock
+export const LOCKOUT_BASE_MINUTES = 15;
+
+export function isLockedOut(user: { lockedUntil: Date | null }): boolean {
+  return user.lockedUntil !== null && user.lockedUntil.getTime() > Date.now();
+}
+
+/**
+ * The state to persist after one failed password/TOTP/backup-code
+ * attempt. Locks only on the attempt that lands exactly on a multiple
+ * of the threshold — attempt 5, 10, 15, ... — for a window that
+ * escalates each time: 15 minutes, 30, 45, and so on. Reuses the one
+ * `failedLogins` counter already on User rather than adding a separate
+ * "how many times locked" column.
+ *
+ * Only ever called once the caller has confirmed the account isn't
+ * *currently* locked (routes check isLockedOut first), so this only
+ * runs for attempt 6-9 once a lock from attempt 5 has already expired —
+ * meaning those get another `lockedUntil: null` clear pass before
+ * attempt 10 locks again, harder. That's deliberate, not a gap: it's
+ * what makes each cycle actually escalate instead of the first lock's
+ * expiry silently discounting every attempt after it.
+ */
+export function nextFailedAttemptState(
+  currentFailedLogins: number
+): { failedLogins: number; lockedUntil: Date | null } {
+  const failedLogins = currentFailedLogins + 1;
+  const cycles = Math.floor(failedLogins / LOCKOUT_THRESHOLD);
+  const justCrossedThreshold = failedLogins % LOCKOUT_THRESHOLD === 0;
+  const lockedUntil = justCrossedThreshold
+    ? new Date(Date.now() + LOCKOUT_BASE_MINUTES * cycles * 60 * 1000)
+    : null;
+  return { failedLogins, lockedUntil };
+}
+
+/** The state to persist once the final factor succeeds. */
+export const SUCCESSFUL_LOGIN_STATE = { failedLogins: 0, lockedUntil: null as Date | null };
+
 // --- TOTP (§7) ---
+
+/**
+ * otplib's own defaults (30-second step, zero window) live inside its
+ * internal allOptions() merge (used by generate/checkDelta/keyuri) and
+ * are never reflected on the public `authenticator.options` getter
+ * unless something sets them explicitly. Two gaps came from that:
+ *
+ * - `.options.step` read as `undefined`, which is how the replay guard
+ *   below was broken: `currentStep` came out NaN, so every "step
+ *   already used" comparison was `NaN <= number`, always false. Setting
+ *   it here means the step verifyTotpCode tracks for replay purposes is
+ *   guaranteed to be the same value checkDelta() actually verifies
+ *   against, not a second hardcoded constant that could drift from it.
+ * - `window` silently defaulted to 0 — no drift tolerance at all,
+ *   despite §7 explicitly calling for "+/-1 time step for clock drift".
+ */
+authenticator.options = { step: 30, window: 1 };
 
 export function generateTotpSecret(): string {
   return authenticator.generateSecret();
@@ -55,6 +119,10 @@ export function generateBackupCodes(count = 10): string[] {
 
 export async function hashBackupCode(code: string): Promise<string> {
   return argon2.hash(code, { type: argon2.argon2id });
+}
+
+export async function verifyBackupCode(hash: string, plain: string): Promise<boolean> {
+  return argon2.verify(hash, plain);
 }
 
 // --- totpSecret encryption at rest (§7) ---

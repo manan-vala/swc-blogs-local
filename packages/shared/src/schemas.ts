@@ -41,10 +41,18 @@ export const superadminLoginSchema = z.object({
 export type SuperadminLoginInput = z.infer<typeof superadminLoginSchema>;
 
 export const totpVerifySchema = z.object({
-  userId: z.string().uuid(),
+  pendingToken: z.string().min(1),
   code: z.string().regex(/^\d{6}$/, "6-digit code"),
 });
 export type TotpVerifyInput = z.infer<typeof totpVerifySchema>;
+
+/** Backup-code login — §7: the recovery path when a superadmin's TOTP
+ *  device is lost. Same pending-token handshake as totpVerifySchema. */
+export const backupCodeVerifySchema = z.object({
+  pendingToken: z.string().min(1),
+  code: z.string().min(1),
+});
+export type BackupCodeVerifyInput = z.infer<typeof backupCodeVerifySchema>;
 
 export const revalidateRequestSchema = z.object({
   paths: z.array(z.string().startsWith("/")).min(1).max(20),

@@ -43,3 +43,37 @@ export async function verifySessionToken(token: string, secret: string): Promise
     return null; // expired, malformed, or wrong secret — treat all identically
   }
 }
+
+/**
+ * The superadmin login's intermediate step (§7): password verified,
+ * second factor not yet. A JWT rather than a plain userId string so the
+ * client can't just hand back any user id it likes to skip straight to
+ * "which account's second factor am I trying" — verify-totp only trusts
+ * a sub it can verify came from a password check it ran itself minutes
+ * ago. `purpose` keeps this from ever being confused with, or accepted
+ * as, a real session token (and vice versa) even though both are HS256
+ * JWTs signed with the same SESSION_SECRET.
+ */
+const PENDING_2FA_TTL_SECONDS = 5 * 60;
+const PENDING_2FA_PURPOSE = "2fa-pending";
+
+export async function signPendingTwoFactorToken(userId: string, secret: string): Promise<string> {
+  return new SignJWT({ purpose: PENDING_2FA_PURPOSE })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(userId)
+    .setIssuedAt()
+    .setExpirationTime(Math.floor(Date.now() / 1000) + PENDING_2FA_TTL_SECONDS)
+    .sign(new TextEncoder().encode(secret));
+}
+
+/** Returns the pending userId, or null if the token is invalid, expired,
+ *  or — despite verifying — isn't actually a pending-2FA token. */
+export async function verifyPendingTwoFactorToken(token: string, secret: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
+    if (payload.purpose !== PENDING_2FA_PURPOSE || typeof payload.sub !== "string") return null;
+    return payload.sub;
+  } catch {
+    return null;
+  }
+}

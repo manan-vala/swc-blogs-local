@@ -16,7 +16,7 @@ import type { PostStatus } from "@swc-blogs/db";
  *   DATABASE_URL=postgresql://postgres:postgres@localhost:55432/postgres \
  *     pnpm --filter @swc-blogs/api test -- notion-sync.service.integration
  */
-const describeIfDb = process.env.DATABASE_URL ? describe : describe.skip;
+const describeIfDb = process.env.HAS_REAL_DATABASE_URL ? describe : describe.skip;
 
 describeIfDb("resolveInternalPageSlug (integration)", () => {
   let prisma: typeof import("@swc-blogs/db").prisma;
