@@ -8,16 +8,17 @@ export async function generateStaticParams() {
   return tags.map((t) => ({ slug: t.slug }));
 }
 
-export default async function TagArchivePage({ params }: { params: { slug: string } }) {
+export default async function TagArchivePage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
   const posts = await prisma.post.findMany({
-    where: { status: "PUBLISHED", tags: { some: { tag: { slug: params.slug } } } },
+    where: { status: "PUBLISHED", tags: { some: { tag: { slug } } } },
     include: { club: true },
     orderBy: { publishedAt: "desc" },
   });
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
-      <h1 className="text-3xl font-bold">#{params.slug}</h1>
+      <h1 className="text-3xl font-bold">#{slug}</h1>
       <ul className="mt-10 space-y-6">
         {posts.map((post) => (
           <li key={post.id}>

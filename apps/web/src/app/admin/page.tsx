@@ -22,17 +22,19 @@ export default async function AdminOverviewPage() {
   const session = await getSession();
   if (!session || session.role !== "SUPERADMIN") notFound();
 
-  const [admin, activeWhitelistCount, clubCount, postCounts, recentAudit] = await Promise.all([
-    prisma.user.findUniqueOrThrow({ where: { id: session.sub } }),
-    prisma.whitelist.count({ where: { revokedAt: null } }),
-    prisma.club.count(),
-    prisma.post.groupBy({ by: ["status"], _count: true }),
-    prisma.auditLog.findMany({
-      include: { actor: true },
-      orderBy: { createdAt: "desc" },
-      take: 8,
-    }),
-  ]);
+  const [admin, activeWhitelistCount, clubCount, postCounts, activeSuperadminCount, recentAudit] =
+    await Promise.all([
+      prisma.user.findUniqueOrThrow({ where: { id: session.sub } }),
+      prisma.whitelist.count({ where: { revokedAt: null } }),
+      prisma.club.count(),
+      prisma.post.groupBy({ by: ["status"], _count: true }),
+      prisma.user.count({ where: { role: "SUPERADMIN", isActive: true } }),
+      prisma.auditLog.findMany({
+        include: { actor: true },
+        orderBy: { createdAt: "desc" },
+        take: 8,
+      }),
+    ]);
 
   const countByStatus = Object.fromEntries(postCounts.map((row) => [row.status, row._count]));
 
@@ -92,12 +94,19 @@ export default async function AdminOverviewPage() {
         )}
       </div>
 
-      <div className="mt-10 rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
+      <div className="mt-10 flex items-center justify-between rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
+        <span>
+          {activeSuperadminCount} active superadmin{activeSuperadminCount === 1 ? "" : "s"}
+          {activeSuperadminCount < 2 && " — §7 recommends keeping at least two, as a recovery path."}
+        </span>
+        <Link href="/admin/users" className="shrink-0 text-xs font-medium text-neutral-700 hover:underline">
+          Manage →
+        </Link>
+      </div>
+
+      <div className="mt-3 rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
         Health (Notion token validity, per-club sync status, media directory
-        size) and Superadmins (a UI for managing other maintainer accounts)
-        aren&apos;t built yet — a second superadmin can only be created via{" "}
-        <code className="font-mono text-xs">create-superadmin</code> on the
-        server for now.
+        size) isn&apos;t built yet.
       </div>
     </AdminShell>
   );

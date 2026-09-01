@@ -9,8 +9,9 @@ export async function generateStaticParams() {
   return clubs.map((c) => ({ slug: c.slug }));
 }
 
-export default async function ClubArchivePage({ params }: { params: { slug: string } }) {
-  const club = await prisma.club.findUnique({ where: { slug: params.slug } });
+export default async function ClubArchivePage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const club = await prisma.club.findUnique({ where: { slug } });
   if (!club) notFound();
 
   const posts = await prisma.post.findMany({

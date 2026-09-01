@@ -12,8 +12,12 @@ interface SearchRow {
   excerpt: string | null;
 }
 
-export default async function SearchPage({ searchParams }: { searchParams: { q?: string } }) {
-  const q = searchParams.q?.trim();
+export default async function SearchPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
+  const q = (await searchParams).q?.trim();
   const results = q
     ? await prisma.$queryRaw<SearchRow[]>`
         SELECT id, title, slug, excerpt

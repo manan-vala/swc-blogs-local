@@ -12,9 +12,10 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false }, // must send X-Robots-Tag: noindex — see §9 table
 };
 
-export default async function PreviewPage({ params }: { params: { token: string } }) {
+export default async function PreviewPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
   const post = await prisma.post.findUnique({
-    where: { previewToken: params.token },
+    where: { previewToken: token },
     include: { club: true },
   });
   if (!post) notFound();

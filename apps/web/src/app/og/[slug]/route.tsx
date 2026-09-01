@@ -4,14 +4,17 @@ import { prisma } from "@swc-blogs/db";
 // Generated OG images — design doc §12: posts get shared into club
 // WhatsApp/Discord groups; a card with title, club and accent colour
 // is the difference between a link people click and one they scroll past.
+//
+// A plain Route Handler, not Next's automatic opengraph-image.tsx
+// convention — [slug]/page.tsx builds this exact URL itself and puts
+// it in openGraph.images, rather than letting Next infer it, so this
+// has to export GET like any other route handler.
 export const runtime = "edge";
-export const alt = "SWC Blogs";
-export const size = { width: 1200, height: 630 };
-export const contentType = "image/png";
 
-export default async function OgImage({ params }: { params: { slug: string } }) {
+export async function GET(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
   const post = await prisma.post.findUnique({
-    where: { slug: params.slug },
+    where: { slug },
     include: { club: true },
   });
 
@@ -35,6 +38,6 @@ export default async function OgImage({ params }: { params: { slug: string } }) 
         </div>
       </div>
     ),
-    size
+    { width: 1200, height: 630 }
   );
 }

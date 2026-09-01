@@ -77,3 +77,60 @@ export async function verifyPendingTwoFactorToken(token: string, secret: string)
     return null;
   }
 }
+
+/**
+ * The superadmin panel's "create a superadmin" / "re-enrol TOTP" flow
+ * (§7): a QR code gets shown, then §7's mandatory live-code check has
+ * to pass BEFORE anything is written to User — same rule the CLI
+ * enforces (see create-superadmin.ts), just over HTTP instead of a
+ * terminal prompt loop. Nothing is persisted between "start" and
+ * "verify", so this token IS the pending state: everything the verify
+ * step needs travels in it, signed so the browser can't edit `mode` or
+ * `targetUserId` to redirect the enrollment onto a different account.
+ * `encryptedSecret` is the same ciphertext `encryptTotpSecret` produces
+ * for at-rest storage — this token is short-lived either way, but
+ * there's no reason to hold the plaintext secret in it when the
+ * already-established encryption helper is right there.
+ */
+export interface SuperadminEnrollClaims {
+  mode: "create" | "reenroll";
+  targetUserId: string | null; // set only for "reenroll"
+  email: string;
+  name: string;
+  passwordHash: string | null; // set only for "create" — reenroll leaves the password alone
+  encryptedSecret: string;
+}
+
+const SUPERADMIN_ENROLL_TTL_SECONDS = 10 * 60;
+const SUPERADMIN_ENROLL_PURPOSE = "superadmin-enroll";
+
+export async function signSuperadminEnrollToken(
+  claims: SuperadminEnrollClaims,
+  secret: string
+): Promise<string> {
+  return new SignJWT({ purpose: SUPERADMIN_ENROLL_PURPOSE, ...claims })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime(Math.floor(Date.now() / 1000) + SUPERADMIN_ENROLL_TTL_SECONDS)
+    .sign(new TextEncoder().encode(secret));
+}
+
+export async function verifySuperadminEnrollToken(
+  token: string,
+  secret: string
+): Promise<SuperadminEnrollClaims | null> {
+  try {
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
+    if (payload.purpose !== SUPERADMIN_ENROLL_PURPOSE) return null;
+    return {
+      mode: payload.mode as SuperadminEnrollClaims["mode"],
+      targetUserId: (payload.targetUserId as string | null) ?? null,
+      email: payload.email as string,
+      name: payload.name as string,
+      passwordHash: (payload.passwordHash as string | null) ?? null,
+      encryptedSecret: payload.encryptedSecret as string,
+    };
+  } catch {
+    return null;
+  }
+}

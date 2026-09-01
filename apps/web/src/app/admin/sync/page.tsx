@@ -16,14 +16,19 @@ export const metadata: Metadata = {
  * Full SyncLog history — design doc §9/§7: lives here only. Authors
  * see just a one-line reason inline on their own dashboard instead.
  */
-export default async function AdminSyncPage({ searchParams }: { searchParams: { postId?: string } }) {
+export default async function AdminSyncPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ postId?: string }>;
+}) {
   const session = await getSession();
   if (!session || session.role !== "SUPERADMIN") notFound();
 
+  const { postId } = await searchParams;
   const [admin, logs] = await Promise.all([
     prisma.user.findUniqueOrThrow({ where: { id: session.sub } }),
     prisma.syncLog.findMany({
-      where: searchParams.postId ? { postId: searchParams.postId } : undefined,
+      where: postId ? { postId } : undefined,
       include: { post: { include: { club: true } } },
       orderBy: { syncedAt: "desc" },
       take: 200,
@@ -37,7 +42,7 @@ export default async function AdminSyncPage({ searchParams }: { searchParams: { 
           <h1 className="text-2xl font-bold">Sync logs</h1>
           <p className="mt-1 text-sm text-neutral-500">Most recent 200 attempts, across every club.</p>
         </div>
-        {searchParams.postId && (
+        {postId && (
           <Link href="/admin/sync" className="text-xs text-neutral-500 hover:underline">
             Clear filter
           </Link>

@@ -21,15 +21,16 @@ const STATUSES = ["DRAFT", "PUBLISHED", "ARCHIVED"] as const;
 export default async function AdminPostsPage({
   searchParams,
 }: {
-  searchParams: { status?: string; clubId?: string };
+  searchParams: Promise<{ status?: string; clubId?: string }>;
 }) {
   const session = await getSession();
   if (!session || session.role !== "SUPERADMIN") notFound();
 
-  const statusFilter = STATUSES.find((s) => s === searchParams.status);
+  const { status, clubId } = await searchParams;
+  const statusFilter = STATUSES.find((s) => s === status);
   const where: Prisma.PostWhereInput = {
     ...(statusFilter && { status: statusFilter }),
-    ...(searchParams.clubId && { clubId: searchParams.clubId }),
+    ...(clubId && { clubId }),
   };
 
   const [admin, posts, clubs] = await Promise.all([
@@ -68,7 +69,7 @@ export default async function AdminPostsPage({
         initialPosts={serialized}
         clubs={clubs.map((c) => ({ id: c.id, name: c.name }))}
         activeStatus={statusFilter}
-        activeClubId={searchParams.clubId}
+        activeClubId={clubId}
       />
     </AdminShell>
   );

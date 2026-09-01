@@ -61,6 +61,32 @@ export const backupCodeVerifySchema = z.object({
 });
 export type BackupCodeVerifyInput = z.infer<typeof backupCodeVerifySchema>;
 
+// --- Superadmin panel: managing other maintainer accounts (§7) ---
+
+/** min(12) matches what the CLI enforces at the password prompt — kept
+ *  in one place so the web enrolment flow can't quietly be weaker. */
+const superadminPassword = z.string().min(12, "At least 12 characters.");
+
+export const superadminCreateStartSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(2).max(80),
+  password: superadminPassword,
+});
+export type SuperadminCreateStartInput = z.infer<typeof superadminCreateStartSchema>;
+
+/** Shared by both the "create" and "re-enrol TOTP" flows — the live-code
+ *  check that has to pass before either one writes anything (§7). */
+export const superadminEnrollVerifySchema = z.object({
+  enrollToken: z.string().min(1),
+  code: z.string().regex(/^\d{6}$/, "6-digit code"),
+});
+export type SuperadminEnrollVerifyInput = z.infer<typeof superadminEnrollVerifySchema>;
+
+export const resetSuperadminPasswordSchema = z.object({
+  password: superadminPassword,
+});
+export type ResetSuperadminPasswordInput = z.infer<typeof resetSuperadminPasswordSchema>;
+
 export const revalidateRequestSchema = z.object({
   paths: z.array(z.string().startsWith("/")).min(1).max(20),
   secret: z.string().min(1),

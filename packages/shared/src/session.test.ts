@@ -4,6 +4,9 @@ import {
   verifySessionToken,
   signPendingTwoFactorToken,
   verifyPendingTwoFactorToken,
+  signSuperadminEnrollToken,
+  verifySuperadminEnrollToken,
+  type SuperadminEnrollClaims,
 } from "./session.js";
 
 const SECRET = "test-secret-at-least-32-bytes-long!!";
@@ -60,5 +63,49 @@ describe("pending two-factor token", () => {
   it("a real session token is never accepted as a pending token — can't be replayed into the 2FA step", async () => {
     const session = await signSessionToken({ sub: "u1", role: "SUPERADMIN", clubId: null }, SECRET);
     expect(await verifyPendingTwoFactorToken(session, SECRET)).toBeNull();
+  });
+});
+
+describe("superadmin enroll token", () => {
+  const createClaims: SuperadminEnrollClaims = {
+    mode: "create",
+    targetUserId: null,
+    email: "new-admin@iitg.ac.in",
+    name: "New Admin",
+    passwordHash: "argon2-hash-stand-in",
+    encryptedSecret: "ciphertext-stand-in",
+  };
+
+  it("round-trips every claim for the 'create' mode", async () => {
+    const token = await signSuperadminEnrollToken(createClaims, SECRET);
+    expect(await verifySuperadminEnrollToken(token, SECRET)).toEqual(createClaims);
+  });
+
+  it("round-trips the 'reenroll' mode, including a null passwordHash", async () => {
+    const claims: SuperadminEnrollClaims = {
+      mode: "reenroll",
+      targetUserId: "u1",
+      email: "existing-admin@iitg.ac.in",
+      name: "Existing Admin",
+      passwordHash: null,
+      encryptedSecret: "ciphertext-stand-in",
+    };
+    const token = await signSuperadminEnrollToken(claims, SECRET);
+    expect(await verifySuperadminEnrollToken(token, SECRET)).toEqual(claims);
+  });
+
+  it("rejects a token signed with a different secret", async () => {
+    const token = await signSuperadminEnrollToken(createClaims, SECRET);
+    expect(await verifySuperadminEnrollToken(token, OTHER_SECRET)).toBeNull();
+  });
+
+  it("rejects garbage input instead of throwing", async () => {
+    expect(await verifySuperadminEnrollToken("not-a-jwt", SECRET)).toBeNull();
+  });
+
+  it("is never accepted as a real session or a pending-2FA token", async () => {
+    const token = await signSuperadminEnrollToken(createClaims, SECRET);
+    expect((await verifySessionToken(token, SECRET))?.role).toBeUndefined();
+    expect(await verifyPendingTwoFactorToken(token, SECRET)).toBeNull();
   });
 });
