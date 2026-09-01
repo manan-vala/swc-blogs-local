@@ -1,4 +1,4 @@
-import { Client } from "@notionhq/client";
+import { Client, APIErrorCode, isNotionClientError } from "@notionhq/client";
 import { NotionToMarkdown } from "notion-to-md";
 import sharp from "sharp";
 import crypto from "node:crypto";
@@ -77,9 +77,9 @@ export async function syncPost(
     await logSync(postId, "SUCCESS", trigger, null, Date.now() - start);
     return { ok: true, postId, durationMs: Date.now() - start };
   } catch (err) {
-    const message = toAuthorFacingError(err);
+    const { message, code } = classifyError(err);
     await prisma.post.update({ where: { id: postId }, data: { lastError: message } });
-    await logSync(postId, "FAILED", trigger, message, Date.now() - start);
+    await logSync(postId, "FAILED", trigger, message, Date.now() - start, code);
     return { ok: false, postId, error: message, durationMs: Date.now() - start };
   }
 }
@@ -195,9 +195,32 @@ async function garbageCollectMedia(postId: string, markdown: string) {
   }
 }
 
-function toAuthorFacingError(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  return "Sync failed for an unknown reason. Try again, or contact SWC if it persists.";
+/**
+ * A short author-facing message (§9) plus, when the failure came from
+ * the Notion SDK, its stable `APIErrorCode`/`ClientErrorCode` — stored
+ * separately on SyncLog.errorCode so the Health screen (§7) can count
+ * recent rate-limiting without pattern-matching arbitrary message text.
+ * Rate-limited and unauthorized get their own copy: the SDK's raw
+ * messages for both are accurate but not written for an author to read.
+ */
+export function classifyError(err: unknown): { message: string; code: string | null } {
+  if (isNotionClientError(err)) {
+    if (err.code === APIErrorCode.RateLimited) {
+      return {
+        message: "Notion is rate-limiting requests right now — this will retry automatically.",
+        code: err.code,
+      };
+    }
+    if (err.code === APIErrorCode.Unauthorized) {
+      return { message: "Notion access was revoked or expired — contact SWC.", code: err.code };
+    }
+    return { message: err.message, code: err.code };
+  }
+  if (err instanceof Error) return { message: err.message, code: null };
+  return {
+    message: "Sync failed for an unknown reason. Try again, or contact SWC if it persists.",
+    code: null,
+  };
 }
 
 async function logSync(
@@ -205,9 +228,10 @@ async function logSync(
   status: "SUCCESS" | "FAILED",
   trigger: string,
   message: string | null,
-  durationMs: number
+  durationMs: number,
+  errorCode: string | null = null
 ) {
   await prisma.syncLog.create({
-    data: { postId, status, trigger, message, durationMs },
+    data: { postId, status, trigger, message, durationMs, errorCode },
   });
 }

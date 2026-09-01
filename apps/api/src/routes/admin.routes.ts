@@ -14,6 +14,7 @@ import {
 } from "@swc-blogs/shared";
 import { requireSuperadmin } from "../middleware/requireAuth.js";
 import { syncPost } from "../services/notion-sync.service.js";
+import { checkNotionToken, getMediaDirSize } from "../services/health.service.js";
 import { env } from "../lib/env.js";
 import {
   hashPassword,
@@ -311,6 +312,19 @@ adminRouter.post("/superadmins/:id/reissue-backup-codes", async (req, res) => {
   await audit(req.user!.id, "superadmin.reissue-backup-codes", "User", target.id, null, req.ip);
   // Shown exactly once, same rule as enrolment.
   res.json({ backupCodes });
+});
+
+// --- Health: integration status at a glance (§7) ---
+//
+// Just the two checks that need something only this process has — the
+// Notion token and the media volume (docker-compose.yml mounts `media`
+// into api and nginx, deliberately not web). Per-club sync status and
+// recent failures/rate-limits are plain Postgres reads and live in the
+// web page itself, same as every other admin screen.
+
+adminRouter.get("/health", async (_req, res) => {
+  const [notion, mediaDirBytes] = await Promise.all([checkNotionToken(), getMediaDirSize()]);
+  res.json({ notion, mediaDirBytes, checkedAt: new Date().toISOString() });
 });
 
 // --- Sync logs: full history lives here only (§9) ---

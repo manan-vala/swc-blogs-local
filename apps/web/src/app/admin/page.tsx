@@ -104,10 +104,6 @@ export default async function AdminOverviewPage() {
         </Link>
       </div>
 
-      <div className="mt-3 rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
-        Health (Notion token validity, per-club sync status, media directory
-        size) isn&apos;t built yet.
-      </div>
     </AdminShell>
   );
 }

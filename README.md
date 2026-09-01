@@ -68,12 +68,12 @@ without reading the design doc's ISR-cache section first.
 
 - [ ] Wire the institute SSO exchange in `apps/api/src/routes/auth.routes.ts` — both endpoints correctly 501 until then; the exchange itself needs IITG's actual protocol decided first (CAS vs OAuth2/OIDC — §13, still open)
 - [ ] Pick and contrast-check the accent/pattern palette (`packages/shared/src/tokens.ts`)
-- [ ] Build the "Health" panel screen (§7) — Notion token validity, per-club sync status, recent 429s, media directory size at a glance. Nothing wired yet.
 - [x] Notion→internal link rewriting pass in the sync service — `apps/api/src/services/link-rewrite.service.ts`
 - [x] Superadmin auth end-to-end — bootstrap/reset CLI (`apps/api/src/cli/create-superadmin.ts`), TOTP enrolment with a mandatory live-code check, real escalating account lockout, and backup-code login — see `apps/api/src/services/auth.service.ts` and `apps/api/src/routes/auth.routes.ts`
 - [x] Admin login UI — two-step password → TOTP/backup-code form (`apps/web/src/components/admin/AdminLoginForm.tsx`) plus a minimal gated `/admin` landing page and sign-out
 - [x] Superadmin panel core — Whitelist, Clubs, Posts (oversight + takedown + forced re-sync), Sync logs, and Audit trail screens under `apps/web/src/app/admin/*`, backed by `apps/api/src/routes/admin.routes.ts`. Club logo upload isn't wired (no media-upload endpoint exists yet); "correct post metadata" beyond takedown/re-sync is deferred too.
 - [x] Superadmins screen (§7) — create (same mandatory-live-code TOTP enrolment as the CLI, now over HTTP via a signed enrolToken instead of a prompt loop), disable/enable, reset password, re-enrol TOTP, reissue backup codes. `apps/web/src/app/admin/users/page.tsx`, `apps/api/src/routes/admin.routes.ts`. The CLI remains the only way to create the *first* superadmin (bootstrapping needs a route to exist before it can be logged into).
+- [x] Health screen (§7) — Notion token validity and media directory size (live checks in `apps/api/src/services/health.service.ts`, since only the api container has the token and the media volume), plus last-sync-per-club, recent failures, and a 24h rate-limited count read straight from Postgres. `apps/web/src/app/admin/health/page.tsx`. All six §7 panel screens now exist.
 - [ ] Decide the deployment pipeline (design doc §13, still open)
 
 ## Fixed along the way

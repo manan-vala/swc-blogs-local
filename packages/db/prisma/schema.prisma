@@ -211,10 +211,16 @@ model SyncLog {
   postId     String
   post       Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
   status     SyncStatus
-  trigger    String // "publish" | "update" | "cron"
+  trigger    String // "publish" | "update" | "cron" | "admin"
   message    String?    @db.Text
+  /// Notion's APIErrorCode/ClientErrorCode when the failure came from
+  /// the Notion SDK (e.g. "rate_limited", "unauthorized") — null for a
+  /// success or a non-Notion failure. Lets the Health screen count
+  /// recent rate-limiting reliably instead of pattern-matching `message`.
+  errorCode  String?
   durationMs Int?
   syncedAt   DateTime   @default(now())
 
   @@index([postId, syncedAt])
+  @@index([errorCode, syncedAt])
 }
