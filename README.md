@@ -54,6 +54,39 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:55432/postgres \
   pnpm --filter @swc-blogs/api test
 ```
 
+## Institute sign-in (Microsoft Entra)
+
+Club secretaries sign in with their `@iitg.ac.in` Microsoft account;
+superadmins use the password + TOTP path instead, which is deliberately
+independent of SSO (§7) so a broken Entra app can't lock out the people
+who'd have to fix it.
+
+The flow: `/blogs/login` → `GET /api/auth/sso/login` (signs an OAuth
+state, sets a matching nonce cookie, redirects to Entra) → user
+authenticates with Microsoft → `GET /api/auth/sso/callback` (verifies
+state + nonce, exchanges the code, reads the email from Microsoft
+Graph, checks it against `Whitelist`, issues the session cookie).
+
+**Identity comes from Microsoft; authorization comes from the
+whitelist.** Signing in successfully with a valid institute account is
+*not* sufficient — the email must also have an unrevoked `Whitelist`
+row, added from `/blogs/admin/whitelist`. A valid Microsoft user who
+isn't whitelisted lands back on the login page with an explanation.
+
+Set-up: register a Web app at <https://entra.microsoft.com>, then add
+**this app's** callback URL to its Redirect URIs — it is not the same
+path as the Senate Portal's, so an existing registration still needs a
+new entry:
+
+```
+https://swc.iitg.ac.in/blogs/api/auth/sso/callback   # production
+http://localhost:4000/api/auth/sso/callback          # local dev
+```
+
+Entra matches Redirect URIs exactly (trailing slash included) and only
+reports a mismatch *after* the user authenticates, so a wrong value
+here looks like a working login that fails at the last step.
+
 ## Deploying
 
 ```bash
@@ -66,7 +99,7 @@ without reading the design doc's ISR-cache section first.
 
 ## Before this goes further than a scaffold
 
-- [ ] Wire the institute SSO exchange in `apps/api/src/routes/auth.routes.ts` — both endpoints correctly 501 until then; the exchange itself needs IITG's actual protocol decided first (CAS vs OAuth2/OIDC — §13, still open)
+- [x] Institute SSO — Microsoft Entra ID authorization-code flow, settling §13's open "CAS vs OAuth2/OIDC" question (IITG accounts are Entra). Protocol mechanics in `apps/api/src/services/microsoft-sso.service.ts`, trust decisions in `apps/api/src/routes/auth.routes.ts`, sign-in page at `apps/web/src/app/login/page.tsx`. Patterned on the Students' Senate Portal's working integration, so one Azure app registration serves both — **but the redirect URI differs per app and must be registered separately** (see `.env.example`).
 - [ ] Pick and contrast-check the accent/pattern palette (`packages/shared/src/tokens.ts`)
 - [x] Notion→internal link rewriting pass in the sync service — `apps/api/src/services/link-rewrite.service.ts`
 - [x] Superadmin auth end-to-end — bootstrap/reset CLI (`apps/api/src/cli/create-superadmin.ts`), TOTP enrolment with a mandatory live-code check, real escalating account lockout, and backup-code login — see `apps/api/src/services/auth.service.ts` and `apps/api/src/routes/auth.routes.ts`

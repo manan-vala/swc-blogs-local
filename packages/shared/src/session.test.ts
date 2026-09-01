@@ -6,6 +6,8 @@ import {
   verifyPendingTwoFactorToken,
   signSuperadminEnrollToken,
   verifySuperadminEnrollToken,
+  signSsoStateToken,
+  verifySsoStateToken,
   type SuperadminEnrollClaims,
 } from "./session.js";
 
@@ -63,6 +65,36 @@ describe("pending two-factor token", () => {
   it("a real session token is never accepted as a pending token — can't be replayed into the 2FA step", async () => {
     const session = await signSessionToken({ sub: "u1", role: "SUPERADMIN", clubId: null }, SECRET);
     expect(await verifyPendingTwoFactorToken(session, SECRET)).toBeNull();
+  });
+});
+
+describe("sso state token", () => {
+  it("round-trips the nonce and redirect it was signed with", async () => {
+    const token = await signSsoStateToken({ nonce: "n1", redirect: "/blogs/dashboard" }, SECRET);
+    expect(await verifySsoStateToken(token, SECRET)).toEqual({
+      nonce: "n1",
+      redirect: "/blogs/dashboard",
+    });
+  });
+
+  it("rejects a token signed with a different secret — an attacker can't mint their own state", async () => {
+    const token = await signSsoStateToken({ nonce: "n1", redirect: "/blogs/dashboard" }, SECRET);
+    expect(await verifySsoStateToken(token, OTHER_SECRET)).toBeNull();
+  });
+
+  it("rejects garbage input instead of throwing", async () => {
+    expect(await verifySsoStateToken("not-a-jwt", SECRET)).toBeNull();
+  });
+
+  it("is never accepted as a session or a pending-2FA token", async () => {
+    const token = await signSsoStateToken({ nonce: "n1", redirect: "/" }, SECRET);
+    expect((await verifySessionToken(token, SECRET))?.role).toBeUndefined();
+    expect(await verifyPendingTwoFactorToken(token, SECRET)).toBeNull();
+  });
+
+  it("a real session token is never accepted as SSO state", async () => {
+    const session = await signSessionToken({ sub: "u1", role: "CLUB_SECY", clubId: "c1" }, SECRET);
+    expect(await verifySsoStateToken(session, SECRET)).toBeNull();
   });
 });
 

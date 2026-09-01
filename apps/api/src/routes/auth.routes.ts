@@ -1,4 +1,5 @@
 import { Router, type Response } from "express";
+import crypto from "node:crypto";
 import {
   superadminLoginSchema,
   totpVerifySchema,
@@ -6,10 +7,26 @@ import {
   signSessionToken,
   signPendingTwoFactorToken,
   verifyPendingTwoFactorToken,
+  signSsoStateToken,
+  verifySsoStateToken,
 } from "@swc-blogs/shared";
 import { prisma } from "@swc-blogs/db";
 import { authRateLimit } from "../middleware/rateLimit.js";
-import { setSessionCookie, clearSessionCookie } from "../middleware/session.js";
+import {
+  setSessionCookie,
+  clearSessionCookie,
+  setSsoNonceCookie,
+  clearSsoNonceCookie,
+  SSO_NONCE_COOKIE_NAME,
+} from "../middleware/session.js";
+import {
+  buildAuthorizeUrl,
+  exchangeCodeForToken,
+  fetchMicrosoftProfile,
+  emailFromProfile,
+  displayNameFromProfile,
+  assertSafeRedirect,
+} from "../services/microsoft-sso.service.js";
 import {
   verifyPassword,
   verifyTotpCode,
@@ -34,35 +51,91 @@ authRouter.post("/logout", (_req, res) => {
 /**
  * Club secretary sign-in — design doc §7, step 1: SSO redirect →
  * callback → email checked against Whitelist → session issued with
- * role + club. Institute SSO isn't wired yet: which protocol IITG
- * actually speaks (CAS vs OAuth2/OIDC) is still open per §13, and
- * SSO_CLIENT_ID/SSO_CLIENT_SECRET have nowhere to be used until it's
- * decided. Both endpoints fail closed with 501 until then.
+ * role + club. §13's open "CAS vs OAuth2/OIDC" question is settled by
+ * IITG accounts being Microsoft Entra ID; the protocol mechanics live
+ * in microsoft-sso.service.ts, the trust decisions live here.
  *
- * This replaces a real bug, not just a stub: the previous callback
- * trusted `req.query.email` directly as a verified identity, so
- * `GET /sso/callback?email=<any-whitelisted-address>` minted a valid
- * session for that secretary — no SSO involved. There's no partial-safe
- * middle ground between "verified by the SSO exchange" and "not wired";
- * a callback that issues sessions from unauthenticated input is worse
- * than one that 501s.
- *
- * admitClubSecretary() below keeps the whitelist-check-and-issue logic
- * ready: once the exchange lands, the callback becomes "verify the
- * code, pull the email out of the verified SSO profile, then call
- * admitClubSecretary(email)". Never call it with request input that
- * hasn't gone through that verification.
+ * The ordering below is the whole security argument, and it is not
+ * rearrangeable: Microsoft establishes *who* this is, then Whitelist
+ * decides *whether they may publish*, and only then is a session
+ * issued. A previous version of this callback trusted
+ * `req.query.email` directly, so `?email=<any-whitelisted-address>`
+ * minted a valid session for that secretary with no SSO involved —
+ * that bug is exactly what skipping the first step looks like.
  */
-authRouter.get("/sso/login", (_req, res) => {
-  // TODO: redirect to SSO_CLIENT_ID's authorize endpoint.
-  res.status(501).json({ error: "SSO integration not yet wired." });
+const DEFAULT_POST_LOGIN_REDIRECT = "/blogs/dashboard";
+
+/** Where the browser lands after the callback. WEB_URL already includes
+ *  the /blogs basePath (see env.ts), and redirect paths are stored with
+ *  it too, so strip it here rather than doubling it. */
+function webUrl(pathWithBasePath: string): string {
+  return new URL(pathWithBasePath, env.WEB_URL).toString();
+}
+
+authRouter.get("/sso/login", authRateLimit, async (req, res) => {
+  const requested = typeof req.query.redirect === "string" ? req.query.redirect : "";
+  const redirect = assertSafeRedirect(requested, DEFAULT_POST_LOGIN_REDIRECT);
+
+  // The nonce goes two places: signed into the state Microsoft echoes
+  // back, and into a cookie only this browser holds. The callback
+  // requires both to match, which is what stops an attacker replaying
+  // their own completed login into someone else's browser.
+  const nonce = crypto.randomBytes(16).toString("base64url");
+  const state = await signSsoStateToken({ nonce, redirect }, env.SESSION_SECRET);
+
+  setSsoNonceCookie(res, nonce);
+  res.redirect(buildAuthorizeUrl(state));
 });
 
-authRouter.get("/sso/callback", async (_req, res) => {
-  // TODO: exchange the code, verify it, and extract the email from the
-  // SSO profile — then await admitClubSecretary(email) and set the
-  // cookie on ok:true, or redirect with a not-whitelisted notice.
-  res.status(501).json({ error: "SSO integration not yet wired." });
+authRouter.get("/sso/callback", authRateLimit, async (req, res) => {
+  const { code, error, error_description: errorDescription, state } = req.query;
+
+  // The nonce cookie has served its purpose either way — a failed
+  // attempt must not leave a reusable one behind.
+  const presentedNonce = req.cookies?.[SSO_NONCE_COOKIE_NAME];
+  clearSsoNonceCookie(res);
+
+  const fail = (reason: string) =>
+    res.redirect(webUrl(`/blogs/login?error=${encodeURIComponent(reason)}`));
+
+  if (error) {
+    // User cancelled at the Microsoft prompt, or Entra refused. Their
+    // own message is written for a developer, not a club secretary.
+    console.warn("[sso] Microsoft returned an error:", errorDescription ?? error);
+    return fail("sso-failed");
+  }
+  if (typeof code !== "string" || !code) return fail("sso-failed");
+
+  const claims = typeof state === "string" ? await verifySsoStateToken(state, env.SESSION_SECRET) : null;
+  if (!claims) return fail("expired");
+  // Constant-time isn't warranted (a nonce mismatch is not a secret
+  // being guessed byte-by-byte), but the comparison must happen.
+  if (!presentedNonce || presentedNonce !== claims.nonce) return fail("expired");
+
+  let email: string;
+  let profileName: string;
+  try {
+    const { access_token } = await exchangeCodeForToken(code);
+    const profile = await fetchMicrosoftProfile(access_token);
+    email = emailFromProfile(profile);
+    profileName = displayNameFromProfile(profile, email);
+  } catch (err) {
+    console.error("[sso] exchange failed:", err instanceof Error ? err.message : err);
+    return fail("sso-failed");
+  }
+
+  if (!email) return fail("sso-failed");
+
+  // Identity is now established by Microsoft. Authorization is a
+  // separate question, and the answer lives in the Whitelist.
+  const result = await admitClubSecretary(email, profileName);
+  if (!result.ok) {
+    console.warn("[sso] login rejected, not whitelisted:", email);
+    return fail("not-whitelisted");
+  }
+
+  setSessionCookie(res, result.token);
+  return res.redirect(webUrl(assertSafeRedirect(claims.redirect, DEFAULT_POST_LOGIN_REDIRECT)));
 });
 
 /**
@@ -71,23 +144,32 @@ authRouter.get("/sso/callback", async (_req, res) => {
  * (i.e. it came out of a completed SSO exchange) — this function does
  * no verification of its own and will happily upsert a User and hand
  * back a live session token for whatever string it's given.
+ *
+ * `name` likewise comes from the verified Microsoft profile when there
+ * is one; it's optional so the whitelist/session half stays testable
+ * on its own, and falls back to the email's local part.
  */
 export async function admitClubSecretary(
-  email: string
+  email: string,
+  name?: string
 ): Promise<{ ok: true; token: string; clubId: string } | { ok: false; reason: "not-whitelisted" }> {
   const entry = await prisma.whitelist.findFirst({ where: { email, revokedAt: null } });
   if (!entry) return { ok: false, reason: "not-whitelisted" };
 
+  const displayName = name?.trim() || email.split("@")[0]!;
   const user = await prisma.user.upsert({
     where: { email },
     create: {
       email,
-      name: email.split("@")[0]!,
+      name: displayName,
       role: "CLUB_SECY",
       provider: "SSO",
       clubId: entry.clubId,
     },
-    update: { lastLoginAt: new Date(), clubId: entry.clubId },
+    // Name refreshes on every login: Entra is the source of truth for
+    // it, and a secretary who changes their display name there should
+    // not stay stale here forever.
+    update: { name: displayName, lastLoginAt: new Date(), clubId: entry.clubId },
   });
 
   const token = await signSessionToken(

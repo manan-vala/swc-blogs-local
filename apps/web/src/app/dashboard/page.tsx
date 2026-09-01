@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@swc-blogs/db";
 import { getSession } from "@/lib/session";
-import { API_BASE } from "@/lib/api";
 import { NewPostButton } from "@/components/dashboard/NewPostButton";
 import { PostCard, type DashboardPost } from "@/components/dashboard/PostCard";
 
@@ -14,7 +13,12 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage() {
   const session = await getSession();
   if (!session || session.role !== "CLUB_SECY" || !session.clubId) {
-    redirect(`${API_BASE}/auth/sso/login`);
+    // Via our own login page, not straight at the API's SSO endpoint:
+    // that page is what renders the "not whitelisted" / "expired"
+    // outcomes the callback redirects back with, so bouncing past it
+    // would make those failures land on a screen that just bounces
+    // the user out to Microsoft again, forever.
+    redirect("/login?redirect=%2Fblogs%2Fdashboard");
   }
 
   const [club, posts] = await Promise.all([

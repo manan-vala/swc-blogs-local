@@ -17,10 +17,17 @@ const envSchema = z.object({
   NOTION_POSTS_DATABASE_ID: z.string().min(1),
   NOTION_TEMPLATE_PAGE_ID: z.string().min(1),
 
-  // Institute SSO — club secretary sign-in (§7)
-  SSO_CLIENT_ID: z.string().min(1),
-  SSO_CLIENT_SECRET: z.string().min(1),
-  SSO_CALLBACK_URL: z.string().url(),
+  // Institute SSO — club secretary sign-in (§7). §13's open question
+  // (CAS vs OAuth2/OIDC) is settled: IITG accounts are Microsoft Entra
+  // ID, so this is the standard Entra authorization-code flow. Names
+  // match the Senate Portal's so one Azure app registration's values
+  // drop into both without translation.
+  MICROSOFT_GRAPH_TENANT_ID: z.string().min(1),
+  MICROSOFT_GRAPH_CLIENT_ID: z.string().min(1),
+  MICROSOFT_GRAPH_CLIENT_SECRET: z.string().min(1),
+  // Must match a Redirect URI registered on the Azure app exactly,
+  // including the /blogs basePath nginx serves this under.
+  MICROSOFT_GRAPH_REDIRECT_URI: z.string().url(),
 
   // Superadmin session (§7) — separate cookie/secret from the SSO session
   SESSION_SECRET: z.string().min(32),

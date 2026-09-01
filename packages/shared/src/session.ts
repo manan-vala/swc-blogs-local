@@ -79,6 +79,50 @@ export async function verifyPendingTwoFactorToken(token: string, secret: string)
 }
 
 /**
+ * OAuth `state` for the Microsoft SSO handshake (§7 step 1). Carries
+ * the post-login redirect path, plus a nonce the callback matches
+ * against a cookie set at login time — that pairing is what makes this
+ * CSRF protection rather than just a way to round-trip a redirect: an
+ * attacker can hand a victim's browser a crafted `?code=`, but can't
+ * produce a state this server signed AND a matching nonce cookie in
+ * the victim's own browser.
+ *
+ * Signed rather than plain base64 for the same reason the pending-2FA
+ * token is: `redirect` comes back to us as something we act on, so it
+ * has to be a value we can prove we issued (the callback also
+ * path-checks it — see assertSafeRedirect in microsoft-sso.service.ts).
+ * Short TTL because a real sign-in round trip is seconds, not hours.
+ */
+export interface SsoStateClaims {
+  nonce: string;
+  redirect: string;
+}
+
+const SSO_STATE_TTL_SECONDS = 10 * 60;
+const SSO_STATE_PURPOSE = "sso-state";
+
+export async function signSsoStateToken(claims: SsoStateClaims, secret: string): Promise<string> {
+  return new SignJWT({ purpose: SSO_STATE_PURPOSE, ...claims })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime(Math.floor(Date.now() / 1000) + SSO_STATE_TTL_SECONDS)
+    .sign(new TextEncoder().encode(secret));
+}
+
+export async function verifySsoStateToken(
+  token: string,
+  secret: string
+): Promise<SsoStateClaims | null> {
+  try {
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
+    if (payload.purpose !== SSO_STATE_PURPOSE || typeof payload.nonce !== "string") return null;
+    return { nonce: payload.nonce, redirect: (payload.redirect as string) ?? "" };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The superadmin panel's "create a superadmin" / "re-enrol TOTP" flow
  * (§7): a QR code gets shown, then §7's mandatory live-code check has
  * to pass BEFORE anything is written to User — same rule the CLI

@@ -95,28 +95,90 @@ describeIfDb("SSO auth (integration)", () => {
     });
   });
 
+  /**
+   * Every test below asserts the absence of a *session* cookie
+   * specifically, not the absence of all Set-Cookie headers: /sso/login
+   * legitimately sets a short-lived nonce cookie, and the callback
+   * legitimately clears it. Only swc_blogs_session means "you are now
+   * signed in as someone."
+   */
+  const sessionCookie = (res: globalThis.Response) =>
+    (res.headers.get("set-cookie") ?? "").match(/swc_blogs_session=([^;]*)/)?.[1] || null;
+
   describe("routes fail closed — no session from unverified request input", () => {
-    it("GET /api/auth/sso/login is not wired (501), no cookie", async () => {
-      const res = await fetch(`${baseUrl}/api/auth/sso/login`);
-      expect(res.status).toBe(501);
-      expect(res.headers.get("set-cookie")).toBeNull();
+    it("GET /sso/login redirects to Microsoft and sets only a nonce cookie", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/sso/login`, { redirect: "manual" });
+      expect(res.status).toBe(302);
+
+      const location = new URL(res.headers.get("location")!);
+      expect(location.host).toBe("login.microsoftonline.com");
+      expect(location.searchParams.get("response_type")).toBe("code");
+      // §7's shared-machine reasoning — see buildAuthorizeUrl's comment.
+      expect(location.searchParams.get("prompt")).toBe("login");
+      expect(location.searchParams.get("state")).toBeTruthy();
+
+      expect(res.headers.get("set-cookie")).toMatch(/swc_blogs_sso_nonce=/);
+      expect(sessionCookie(res)).toBeNull();
     });
 
-    it("GET /api/auth/sso/callback is not wired (501) with no query at all", async () => {
-      const res = await fetch(`${baseUrl}/api/auth/sso/callback`);
-      expect(res.status).toBe(501);
-      expect(res.headers.get("set-cookie")).toBeNull();
+    it("GET /sso/callback with no query at all: back to login with an error, no session", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/sso/callback`, { redirect: "manual" });
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).toMatch(/\/blogs\/login\?error=/);
+      expect(sessionCookie(res)).toBeNull();
     });
 
-    it("GET /api/auth/sso/callback?email=<whitelisted address> still 501s — the regression this guards against", async () => {
+    it("GET /sso/callback?email=<whitelisted address> issues no session — the original bug this guards against", async () => {
       const email = `secy-${crypto.randomUUID()}@iitg.ac.in`;
       await prisma.whitelist.create({ data: { email, clubId } });
 
       const res = await fetch(`${baseUrl}/api/auth/sso/callback?email=${encodeURIComponent(email)}`, {
         redirect: "manual",
       });
-      expect(res.status).toBe(501);
-      expect(res.headers.get("set-cookie")).toBeNull();
+      expect(sessionCookie(res)).toBeNull();
+      // And no user was created for that address as a side effect.
+      expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+    });
+
+    it("GET /sso/callback with a code but no state is refused before any token exchange", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/sso/callback?code=fake-authorization-code`, {
+        redirect: "manual",
+      });
+      expect(res.headers.get("location")).toMatch(/error=expired/);
+      expect(sessionCookie(res)).toBeNull();
+    });
+
+    it("a validly-signed state with no matching nonce cookie is refused — the CSRF guard", async () => {
+      const { signSsoStateToken } = await import("@swc-blogs/shared");
+      const state = await signSsoStateToken(
+        { nonce: "a-nonce-this-browser-never-received", redirect: "/blogs/dashboard" },
+        process.env.SESSION_SECRET!
+      );
+
+      const res = await fetch(
+        `${baseUrl}/api/auth/sso/callback?code=fake-authorization-code&state=${encodeURIComponent(state)}`,
+        { redirect: "manual" }
+      );
+      expect(res.headers.get("location")).toMatch(/error=expired/);
+      expect(sessionCookie(res)).toBeNull();
+    });
+
+    it("a state signed with the wrong secret is refused", async () => {
+      const { signSsoStateToken } = await import("@swc-blogs/shared");
+      const forged = await signSsoStateToken(
+        { nonce: "attacker-chosen", redirect: "/blogs/dashboard" },
+        "a-completely-different-secret-value-32b"
+      );
+
+      const res = await fetch(
+        `${baseUrl}/api/auth/sso/callback?code=fake&state=${encodeURIComponent(forged)}`,
+        {
+          redirect: "manual",
+          headers: { cookie: "swc_blogs_sso_nonce=attacker-chosen" },
+        }
+      );
+      expect(res.headers.get("location")).toMatch(/error=expired/);
+      expect(sessionCookie(res)).toBeNull();
     });
   });
 });
